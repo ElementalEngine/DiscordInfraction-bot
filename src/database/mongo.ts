@@ -40,7 +40,9 @@ export const InfractionSchema = new Schema<IInfraction>(
     2. MODELS
    ======================================================== */
 
-// Suspension model – holds infraction details, suspended flag, end date, and cached roles.
+/**
+  * Suspension model – holds infraction details, suspended flag, end date, and cached roles.
+  */
 export interface ISuspension extends Document {
   discord_id: string;
   suspended: boolean;
@@ -154,45 +156,6 @@ export const recordUnsuspensionDue = async (discordId: string): Promise<void> =>
     await UnsuspensionDue.create({ _id: discordId });
   } catch (err: any) {
     if (err.code !== 11000) console.error(`Error recording unsuspension due for ${discordId}:`, err);
-  }
-};
-
-/**
- * Checks if a ban is due.
- */
-export const isBanDue = async (discordId: string): Promise<boolean> => {
-  try {
-    const result = await BanDue.deleteOne({ _id: discordId });
-    return result.deletedCount > 0;
-  } catch (err) {
-    console.error(`Error checking ban due for ${discordId}:`, err);
-    return false;
-  }
-};
-
-/**
- * Checks if a suspension is due.
- */
-export const isSuspensionDue = async (discordId: string): Promise<boolean> => {
-  try {
-    const result = await SuspensionDue.deleteOne({ _id: discordId });
-    return result.deletedCount > 0;
-  } catch (err) {
-    console.error(`Error checking suspension due for ${discordId}:`, err);
-    return false;
-  }
-};
-
-/**
- * Checks if an unsuspension is due.
- */
-export const isUnsuspensionDue = async (discordId: string): Promise<boolean> => {
-  try {
-    const result = await UnsuspensionDue.deleteOne({ _id: discordId });
-    return result.deletedCount > 0;
-  } catch (err) {
-    console.error(`Error checking unsuspension due for ${discordId}:`, err);
-    return false;
   }
 };
 
@@ -337,15 +300,10 @@ async function recordInfraction(
 
     // Define suspension durations (in days) for each tier.
     const durations: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number[] } = {
-      // quit: Tier 1: 1, Tier 2: 3, Tier 3: 7, Tier 4: 14, Tier 5: 30
       quit: [1, 3, 7, 14, 30],
-      // minor: Tier 1: Warning (0), Tier 2: 1, Tier 3: 2, Tier 4: 4, Tier 5: 7, Tier 6: 14
       minor: [0, 1, 2, 4, 7, 14],
-      // moderate: Tier 1: 1, Tier 2: 4, Tier 3: 7, Tier 4: 14, Tier 5: 30
       moderate: [1, 4, 7, 14, 30],
-      // major: Tier 1: 7, Tier 2: 14, Tier 3: 30
       major: [7, 14, 30],
-      // extreme: Tier 1: 30
       extreme: [30],
     };
 
@@ -416,10 +374,12 @@ export const recordExtremeInfraction = async (discordId: string) => {
  */
 export const checkExpiredSuspensions = async (): Promise<void> => {
   try {
+    console.log('[Expired Suspensions] Starting expired suspension check.');
     const now = new Date();
     const expiredRecords = await Suspension.find({ suspended: true, ends: { $lte: now } });
     if (expiredRecords.length === 0) {
-      console.log('[checkExpiredSuspensions] No expired suspensions found.');
+      console.log('[Expired Suspensions] No expired suspensions found.');
+      console.log('[Expired Suspensions] Expired suspension check complete.');
       return;
     }
     for (const record of expiredRecords) {
@@ -429,12 +389,13 @@ export const checkExpiredSuspensions = async (): Promise<void> => {
           { $set: { _id: record.discord_id } },
           { upsert: true }
         );
-        console.log(`[checkExpiredSuspensions] Upserted UnsuspensionDue for ${record.discord_id}.`);
+        console.log(`[Expired Suspensions] Moved ${record.discord_id} into UnsuspensionDue.`);
       } catch (upsertError: any) {
-        console.error(`[checkExpiredSuspensions] Error upserting UnsuspensionDue for ${record.discord_id}:`, upsertError);
+        console.error(`[Expired Suspensions] Error upserting UnsuspensionDue for ${record.discord_id}:`, upsertError);
       }
     }
+    console.log('[Expired Suspensions] Expired suspension check complete.');
   } catch (error) {
-    console.error('[checkExpiredSuspensions] Error checking expired suspensions:', error);
+    console.error('[Expired Suspensions] Error checking expired suspensions:', error);
   }
 };
