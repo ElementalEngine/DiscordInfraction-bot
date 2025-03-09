@@ -33,7 +33,7 @@ export const InfractionSchema = new Schema<IInfraction>(
     tier: { type: Number, default: 0 },
     decays: { type: Date, default: null },
   },
-  { _id: false } // Disable automatic _id for subdocuments
+  { _id: false }
 );
 
 /* ========================================================
@@ -70,6 +70,8 @@ export const Suspension: Model<ISuspension> = mongoose.model<ISuspension>('Suspe
 // Minimal model for "due" collections (storing only the Discord ID)
 export interface IMinimal extends Document {
   _id: string;
+  punishmentType?: string;
+  reason?: string;
 }
 
 const MinimalSchema: Schema = new Schema({
@@ -126,10 +128,19 @@ export const recordBanDue = async (discordId: string): Promise<void> => {
 
 /**
  * Records a suspension due.
+ * Now accepts punishmentType and reason to store additional details.
  */
-export const recordSuspensionDue = async (discordId: string): Promise<void> => {
+export const recordSuspensionDue = async (
+  discordId: string,
+  punishmentType: string,
+  reason?: string
+): Promise<void> => {
   try {
-    await SuspensionDue.create({ _id: discordId });
+    await SuspensionDue.updateOne(
+      { _id: discordId },
+      { $set: { _id: discordId, punishmentType, reason } },
+      { upsert: true }
+    );
   } catch (err: any) {
     if (err.code !== 11000) console.error(`Error recording suspension due for ${discordId}:`, err);
   }
@@ -309,7 +320,7 @@ export const clearSuspendedRoles = async (discordId: string): Promise<void> => {
 };
 
 /**
- * function to record an infraction.
+ * Records an infraction and updates the suspension record.
  */
 async function recordInfraction(
   discordId: string,
@@ -324,7 +335,7 @@ async function recordInfraction(
       extreme: 2,
     };
 
-    // Define suspension durations (in days) for each tier (if the tier is below the ban threshold).
+    // Define suspension durations (in days) for each tier.
     const durations: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number[] } = {
       // quit: Tier 1: 1, Tier 2: 3, Tier 3: 7, Tier 4: 14, Tier 5: 30
       quit: [1, 3, 7, 14, 30],
@@ -393,4 +404,37 @@ export const recordMajorInfraction = async (discordId: string) => {
 
 export const recordExtremeInfraction = async (discordId: string) => {
   return await recordInfraction(discordId, 'extreme');
+};
+
+/* ========================================================
+    5. EXPIRED SUSPENSION CHECK
+   ======================================================== */
+
+/**
+ * Scans for expired suspensions and upserts an UnsuspensionDue document for each.
+ * This ensures that if a suspension has ended, an unsuspension action is triggered.
+ */
+export const checkExpiredSuspensions = async (): Promise<void> => {
+  try {
+    const now = new Date();
+    const expiredRecords = await Suspension.find({ suspended: true, ends: { $lte: now } });
+    if (expiredRecords.length === 0) {
+      console.log('[checkExpiredSuspensions] No expired suspensions found.');
+      return;
+    }
+    for (const record of expiredRecords) {
+      try {
+        await UnsuspensionDue.updateOne(
+          { _id: record.discord_id },
+          { $set: { _id: record.discord_id } },
+          { upsert: true }
+        );
+        console.log(`[checkExpiredSuspensions] Upserted UnsuspensionDue for ${record.discord_id}.`);
+      } catch (upsertError: any) {
+        console.error(`[checkExpiredSuspensions] Error upserting UnsuspensionDue for ${record.discord_id}:`, upsertError);
+      }
+    }
+  } catch (error) {
+    console.error('[checkExpiredSuspensions] Error checking expired suspensions:', error);
+  }
 };
