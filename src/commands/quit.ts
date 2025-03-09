@@ -1,6 +1,6 @@
-import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder, User } from 'discord.js';
 import { config } from '../config';
-import { recordQuitInfraction, recordBanDue, findOrCreateSuspensionByDiscordId } from '../database/mongo';
+import { recordQuitInfraction, recordBanDue, recordSuspensionDue} from '../database/mongo';
 import { RoleHandler } from '../controllers/roleHandler';
 import { buildSuspensionNotice, buildSuspensionChannelMessage } from '../controllers/messageHandler';
 
@@ -23,12 +23,12 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: false });
 
-  // Ensure the command is used in the suspended channel.
+  // Ensure command is used in the suspended channel.
   if (interaction.channel?.id !== config.discord.channels.suspendedChannel) {
     return interaction.editReply('This command can only be used in the suspended channel.');
   }
 
-  // Check permissions.
+  // Check mod permissions.
   const invoker = interaction.member as GuildMember;
   const hasPermission =
     invoker.roles.cache.has(config.discord.roles.moderator) ||
@@ -37,48 +37,46 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return interaction.editReply('You do not have permission to use this command.');
   }
 
-  // Get target member and reason.
-  const targetMember = interaction.options.getMember('target') as GuildMember;
-  if (!targetMember) {
-    return interaction.editReply('User not found!');
-  }
+  // Always get the target as a User, then try to get the GuildMember.
+  const targetUser: User = interaction.options.getUser('target')!;
+  const targetMember = interaction.options.getMember('target') as GuildMember | null;
   const reason = interaction.options.getString('reason') ?? 'No reason provided';
 
   try {
-    // Fetch current suspension record.
-    const currentRecord = await findOrCreateSuspensionByDiscordId(targetMember.id);
-    if (currentRecord.quit.tier >= 6) {
-      return interaction.editReply(`<@${targetMember.id}> is already due to be banned.`);
-    }
+    // Update the suspension record by recording a quit infraction.
+    const result = await recordQuitInfraction(targetUser.id);
 
-    // Record quit infraction.
-    const result = await recordQuitInfraction(targetMember.id);
-
-    // Build messages for DM and channel.
-    let dmMessage: string;
-    let channelMessage: string;
-
-    if (result.tier < 6) {
-      // Apply suspension.
-      await RoleHandler.suspendMember(targetMember);
-      dmMessage = buildSuspensionNotice('quit', result.tier, result.ends, reason, false);
-      channelMessage = buildSuspensionChannelMessage(targetMember.id, 'quit', result.tier, result.ends, reason, false);
+    if (targetMember) {
+      // If the target is in the guild, process the suspension normally.
+      if (result.tier < 6) {
+        await RoleHandler.suspendMember(targetMember);
+        const dmMessage = buildSuspensionNotice('quit', result.tier, result.ends, reason, false);
+        const channelMessage = buildSuspensionChannelMessage(targetUser.id, 'quit', result.tier, result.ends, reason, false);
+        try {
+          await targetMember.user.send(dmMessage);
+        } catch (err) {
+          console.error(`Failed to DM <@${targetUser.id}>:`, err);
+        }
+        await interaction.editReply(channelMessage);
+      } else {
+        // If tier 6 is reached, record ban due and process accordingly.
+        await RoleHandler.suspendMember(targetMember);
+        await recordBanDue(targetUser.id);
+        const dmMessage = buildSuspensionNotice('quit', result.tier, result.ends, reason, true);
+        const channelMessage = buildSuspensionChannelMessage(targetUser.id, 'quit', result.tier, result.ends, reason, true);
+        try {
+          await targetMember.user.send(dmMessage);
+        } catch (err) {
+          console.error(`Failed to DM <@${targetUser.id}>:`, err);
+        }
+        await interaction.editReply(channelMessage);
+      }
     } else {
-      // Tier 6: record ban due and notify moderators.
-      await RoleHandler.suspendMember(targetMember);
-      await recordBanDue(targetMember.id);
-      dmMessage = buildSuspensionNotice('quit', result.tier, result.ends, reason, true);
-      channelMessage = buildSuspensionChannelMessage(targetMember.id, 'quit', result.tier, result.ends, reason, true);
+      // If the user is not in the guild, record a SuspensionDue document.
+      await recordSuspensionDue(targetUser.id, 'quit');
+      console.log(`[Quit Command] Recorded suspension due for absent user ${targetUser.id}.`);
+      await interaction.editReply(`<@${targetUser.id}> is not in the guild. Their punishment has been recorded for processing when they rejoin.`);
     }
-
-    // Attempt to send DM; log error if it fails.
-    try {
-      await targetMember.user.send(dmMessage);
-    } catch (err) {
-      console.error(`Failed to DM <@${targetMember.id}>:`, err);
-    }
-
-    await interaction.editReply(channelMessage);
   } catch (error) {
     console.error('Error executing quit command:', error);
     await interaction.editReply('There was an error processing the command.');
