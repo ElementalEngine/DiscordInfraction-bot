@@ -4,11 +4,7 @@ import { config } from '../config';
 /* ========================================================
     0. DATABASE CONNECTION
    ======================================================== */
-
-/**
- * Connects to MongoDB using the URL from the configuration.
- * Example URL: mongodb://localhost:27017/players
- */
+   // Connects to the MongoDB database.
 export const connectDB = async (): Promise<void> => {
   try {
     await mongoose.connect(config.mongoDb);
@@ -22,7 +18,7 @@ export const connectDB = async (): Promise<void> => {
 /* ========================================================
     1. INFRACTION DEFINITIONS
    ======================================================== */
-
+   // Infraction model – holds tier and decay date.
 export interface IInfraction extends Document {
   tier: number;
   decays: Date | null;
@@ -39,10 +35,7 @@ export const InfractionSchema = new Schema<IInfraction>(
 /* ========================================================
     2. MODELS
    ======================================================== */
-
-/**
-  * Suspension model – holds infraction details, suspended flag, end date, and cached roles.
-  */
+   // Suspension model – holds infraction details, suspended flag, end date, and cached roles.
 export interface ISuspension extends Document {
   discord_id: string;
   suspended: boolean;
@@ -72,12 +65,12 @@ export const Suspension: Model<ISuspension> = mongoose.model<ISuspension>('Suspe
 // Minimal model for "due" collections (storing only the Discord ID)
 export interface IMinimal extends Document {
   _id: string;
-  punishmentType?: string;
-  reason?: string;
+  createdAt?: Date;
 }
 
 const MinimalSchema: Schema = new Schema({
-  _id: { type: String, required: true }
+  _id: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
 });
 
 export const BanDue: Model<IMinimal> = mongoose.model<IMinimal>('BanDue', MinimalSchema, 'bans_due');
@@ -87,7 +80,6 @@ export const UnsuspensionDue: Model<IMinimal> = mongoose.model<IMinimal>('Unsusp
 /* ========================================================
     3. QUERIES & HELPER FUNCTIONS
    ======================================================== */
-
 /**
  * Finds a suspension record by Discord ID.
  * If it doesn't exist, creates one with default values.
@@ -110,16 +102,12 @@ export const findOrCreateSuspensionByDiscordId = async (discordId: string): Prom
   return suspension;
 };
 
-/**
- * Updates a suspension record.
- */
+   // Updates a suspension record.
 export const updateSuspension = async (discordId: string, update: Record<string, any>) => {
   return await Suspension.updateOne({ discord_id: discordId }, { $set: update });
 };
 
-/**
- * Records a ban due by inserting a minimal document.
- */
+   // Records a ban due by inserting a minimal document.
 export const recordBanDue = async (discordId: string): Promise<void> => {
   try {
     await BanDue.create({ _id: discordId });
@@ -148,9 +136,7 @@ export const recordSuspensionDue = async (
   }
 };
 
-/**
- * Records an unsuspension due.
- */
+   // Records an unsuspension due.
 export const recordUnsuspensionDue = async (discordId: string): Promise<void> => {
   try {
     await UnsuspensionDue.create({ _id: discordId });
@@ -162,10 +148,7 @@ export const recordUnsuspensionDue = async (discordId: string): Promise<void> =>
 /* ========================================================
     4. SUSPENSION & INFRACTION OPERATIONS
    ======================================================== */
-
-/**
- * Adds a number of days to the suspension end date and marks the player as suspended.
- */
+   // Adds a number of days to the suspension end date and marks the player as suspended.
 export const addDays = async (discordId: string, num: number): Promise<Date> => {
   try {
     const record: ISuspension = await findOrCreateSuspensionByDiscordId(discordId);
@@ -180,9 +163,7 @@ export const addDays = async (discordId: string, num: number): Promise<Date> => 
   }
 };
 
-/**
- * Removes a number of days from the suspension end date.
- */
+   // Removes a number of days from the suspension end date.
 export const rmDays = async (discordId: string, num: number): Promise<Date | null> => {
   try {
     const record: ISuspension = await findOrCreateSuspensionByDiscordId(discordId);
@@ -197,9 +178,7 @@ export const rmDays = async (discordId: string, num: number): Promise<Date | nul
   }
 };
 
-/**
- * Applies a sub-suspension by adding 3 days.
- */
+   // Applies a sub-suspension by adding 3 days.
 export const subSuspension = async (discordId: string): Promise<Date> => {
   try {
     return await addDays(discordId, 3);
@@ -209,9 +188,7 @@ export const subSuspension = async (discordId: string): Promise<Date> => {
   }
 };
 
-/**
- * Applies a smurf suspension by adding 30 days.
- */
+   // Applies a smurf suspension by adding 30 days.
 export const smurfSuspension = async (discordId: string): Promise<Date> => {
   try {
     return await addDays(discordId, 30);
@@ -221,9 +198,7 @@ export const smurfSuspension = async (discordId: string): Promise<Date> => {
   }
 };
 
-/**
- * Applies a competition suspension by adding 7 days.
- */
+   // Applies a competition suspension by adding 7 days.
 export const compSuspension = async (discordId: string): Promise<Date> => {
   try {
     return await addDays(discordId, 7);
@@ -233,9 +208,7 @@ export const compSuspension = async (discordId: string): Promise<Date> => {
   }
 };
 
-/**
- * Unsuspends the player by clearing the suspended flag and end date.
- */
+   // Unsuspends the player by clearing the suspended flag and end date.
 export const unsuspend = async (discordId: string): Promise<void> => {
   try {
     await updateSuspension(discordId, { suspended: false, ends: null });
@@ -245,9 +218,7 @@ export const unsuspend = async (discordId: string): Promise<void> => {
   }
 };
 
-/**
- * Updates the suspended roles in the record.
- */
+   // Updates the suspended roles in the record.
 export const updateSuspendedRoles = async (discordId: string, rolesArray: string[]): Promise<void> => {
   try {
     await updateSuspension(discordId, { suspendedRoles: rolesArray });
@@ -257,9 +228,7 @@ export const updateSuspendedRoles = async (discordId: string, rolesArray: string
   }
 };
 
-/**
- * Retrieves the suspended roles from the record.
- */
+   // Retrieves the suspended roles from the record.
 export const getSuspendedRoles = async (discordId: string): Promise<string[]> => {
   try {
     const record: ISuspension = await findOrCreateSuspensionByDiscordId(discordId);
@@ -270,9 +239,7 @@ export const getSuspendedRoles = async (discordId: string): Promise<string[]> =>
   }
 };
 
-/**
- * Clears the suspended roles in the record.
- */
+   // Clears the suspended roles in the record.
 export const clearSuspendedRoles = async (discordId: string): Promise<void> => {
   try {
     await updateSuspension(discordId, { $unset: { suspendedRoles: "" } });
@@ -282,92 +249,99 @@ export const clearSuspendedRoles = async (discordId: string): Promise<void> => {
   }
 };
 
-/**
- * Records an infraction and updates the suspension record.
- */
-async function recordInfraction(
-  discordId: string,
-  category: 'quit' | 'minor' | 'moderate' | 'major' | 'extreme'
-): Promise<{ tier: number; ends: Date }> {
-  try {
-    const caps: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number } = {
-      quit: 6,
-      minor: 7,
-      moderate: 6,
-      major: 4,
-      extreme: 2,
-    };
-
-    // Define suspension durations (in days) for each tier.
-    const durations: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number[] } = {
-      quit: [1, 3, 7, 14, 30],
-      minor: [0, 1, 2, 4, 7, 14],
-      moderate: [1, 4, 7, 14, 30],
-      major: [7, 14, 30],
-      extreme: [30],
-    };
-
-    const record = await findOrCreateSuspensionByDiscordId(discordId);
-    const currentTier: number = record[category]?.tier ?? 0;
-
-    let newTier: number = Math.min(currentTier + 1, caps[category]);
-
-    const now = new Date();
-    const currentEnd = record.ends && new Date(record.ends) > now ? new Date(record.ends) : now;
-    
-    // Determine suspension duration based on new tier (if below the ban threshold).
-    let daysToAdd = 0;
-    if (newTier <= durations[category].length) {
-      daysToAdd = durations[category][newTier - 1];
+   // Records an infraction and updates the suspension record.
+  async function recordInfraction(
+    discordId: string,
+    category: 'quit' | 'minor' | 'moderate' | 'major' | 'extreme'
+  ): Promise<{ tier: number; ends: Date }> {
+    try {
+      const caps: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number } = {
+        quit: 6,
+        minor: 7,
+        moderate: 6,
+        major: 4,
+        extreme: 2,
+      };
+  
+      // Define suspension durations (in days) for each tier.
+      const durations: { [key in 'quit' | 'minor' | 'moderate' | 'major' | 'extreme']: number[] } = {
+        quit: [1, 3, 7, 14, 30],
+        minor: [0, 1, 2, 4, 7, 14],
+        moderate: [1, 4, 7, 14, 30],
+        major: [7, 14, 30],
+        extreme: [30],
+      };
+  
+      const record = await findOrCreateSuspensionByDiscordId(discordId);
+      const currentTier: number = record[category]?.tier ?? 0;
+      let newTier: number = Math.min(currentTier + 1, caps[category]);
+  
+      const now = new Date();
+      // Use the existing end date if it's in the future; otherwise, now.
+      const currentEnd = record.ends && new Date(record.ends) > now ? new Date(record.ends) : now;
+      
+      // Determine suspension duration based on new tier.
+      let daysToAdd = 0;
+      if (newTier <= durations[category].length) {
+        daysToAdd = durations[category][newTier - 1];
+      }
+      currentEnd.setDate(currentEnd.getDate() + daysToAdd);
+  
+      // Set decay period: for extreme infractions, 4 years (1460 days); otherwise, 90 days.
+      const decays = new Date();
+      decays.setDate(decays.getDate() + (category === 'extreme' ? 1460 : 90));
+  
+      // For minor infractions, if tier is 1 (warning) then do not mark as suspended.
+      const suspended = !(category === 'minor' && newTier === 1);
+  
+      // Build the update object.
+      const updateObj: Record<string, any> = {
+        [`${category}.tier`]: newTier,
+        [`${category}.decays`]: decays,
+        suspended: suspended,
+      };
+  
+      // If it's a minor warning, store no end date in the DB but return a fallback date.
+      let retEnds: Date;
+      if (category === 'minor' && newTier === 1) {
+        updateObj.ends = null;
+        retEnds = now; // Fallback: you can choose a different default if desired.
+      } else {
+        updateObj.ends = currentEnd;
+        retEnds = currentEnd;
+      }
+  
+      await updateSuspension(discordId, updateObj);
+      return { tier: newTier, ends: retEnds };
+    } catch (error) {
+      console.error(`Error recording ${category} infraction for ${discordId}:`, error);
+      throw error;
     }
-    currentEnd.setDate(currentEnd.getDate() + daysToAdd);
-
-    // Set decay period: for extreme infractions, 4 years (1460 days); otherwise, 90 days.
-    const decays = new Date();
-    decays.setDate(decays.getDate() + (category === 'extreme' ? 1460 : 90));
-
-    // For minor infractions, if tier is 1 (warning) then do not mark as suspended.
-    const suspended = !(category === 'minor' && newTier === 1);
-
-    const updateObj: Record<string, any> = {
-      [`${category}.tier`]: newTier,
-      [`${category}.decays`]: decays,
-      ends: currentEnd,
-      suspended: suspended,
-    };
-
-    await updateSuspension(discordId, updateObj);
-    return { tier: newTier, ends: currentEnd };
-  } catch (error) {
-    console.error(`Error recording ${category} infraction for ${discordId}:`, error);
-    throw error;
   }
-}
-
-export const recordQuitInfraction = async (discordId: string) => {
-  return await recordInfraction(discordId, 'quit');
-};
-
-export const recordMinorInfraction = async (discordId: string) => {
-  return await recordInfraction(discordId, 'minor');
-};
-
-export const recordModerateInfraction = async (discordId: string) => {
-  return await recordInfraction(discordId, 'moderate');
-};
-
-export const recordMajorInfraction = async (discordId: string) => {
-  return await recordInfraction(discordId, 'major');
-};
-
-export const recordExtremeInfraction = async (discordId: string) => {
-  return await recordInfraction(discordId, 'extreme');
-};
+  
+  export const recordQuitInfraction = async (discordId: string) => {
+    return await recordInfraction(discordId, 'quit');
+  };
+  
+  export const recordMinorInfraction = async (discordId: string) => {
+    return await recordInfraction(discordId, 'minor');
+  };
+  
+  export const recordModerateInfraction = async (discordId: string) => {
+    return await recordInfraction(discordId, 'moderate');
+  };
+  
+  export const recordMajorInfraction = async (discordId: string) => {
+    return await recordInfraction(discordId, 'major');
+  };
+  
+  export const recordExtremeInfraction = async (discordId: string) => {
+    return await recordInfraction(discordId, 'extreme');
+  };
 
 /* ========================================================
     5. EXPIRED SUSPENSION CHECK
    ======================================================== */
-
 /**
  * Scans for expired suspensions and upserts an UnsuspensionDue document for each.
  * This ensures that if a suspension has ended, an unsuspension action is triggered.
@@ -376,6 +350,7 @@ export const checkExpiredSuspensions = async (): Promise<void> => {
   try {
     console.log('[Expired Suspensions] Starting expired suspension check.');
     const now = new Date();
+    // Find all suspension records where suspended is true and the end date is in the past.
     const expiredRecords = await Suspension.find({ suspended: true, ends: { $lte: now } });
     if (expiredRecords.length === 0) {
       console.log('[Expired Suspensions] No expired suspensions found.');
@@ -389,7 +364,9 @@ export const checkExpiredSuspensions = async (): Promise<void> => {
           { $set: { _id: record.discord_id } },
           { upsert: true }
         );
-        console.log(`[Expired Suspensions] Moved ${record.discord_id} into UnsuspensionDue.`);
+        // Retrieve the created document to log its creation time.
+        const doc = await UnsuspensionDue.findOne({ _id: record.discord_id });
+        console.log(`[Expired Suspensions] Moved ${record.discord_id} into UnsuspensionDue. Document created at: ${doc?.createdAt}`);
       } catch (upsertError: any) {
         console.error(`[Expired Suspensions] Error upserting UnsuspensionDue for ${record.discord_id}:`, upsertError);
       }
