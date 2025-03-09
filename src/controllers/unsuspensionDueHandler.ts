@@ -3,71 +3,64 @@ import { config } from '../config';
 import { UnsuspensionDue, findOrCreateSuspensionByDiscordId } from '../database/mongo';
 import { RoleHandler } from './roleHandler';
 
-const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000;
+const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000; // Approximate 3 months
 
-/**
- * Processes unsuspensions based solely on the UnsuspensionDue table.
- */
 export async function processUnsuspensionEvents(client: Client): Promise<void> {
-  try {
-    console.log('[Unsuspension Check] Starting unsuspension check.');
-    
-    const unsuspDueDocs = await UnsuspensionDue.find({});
-    if (unsuspDueDocs.length === 0) {
-      console.log('[Unsuspension Check] No unsuspension due records found.');
-      return;
-    }
-    
-    const guild = client.guilds.cache.get(config.discord.guildId);
-    if (!guild) {
-      console.error('[Unsuspension Check] Guild not found in cache.');
-      return;
-    }
-    
-    const now = new Date();
-    for (const doc of unsuspDueDocs) {
-      const discordId = doc._id;
-      const suspensionRecord = await findOrCreateSuspensionByDiscordId(discordId);
-      
-      if (suspensionRecord.suspended) {
-        const member = await guild.members.fetch(discordId).catch(() => null);
-        
-        if (member) {
-          // Unsuspend the member immediately.
-          await RoleHandler.unsuspendMember(member, suspensionRecord.suspendedRoles);
-          suspensionRecord.suspended = false;
-          suspensionRecord.suspendedRoles = [];
-          suspensionRecord.ends = null;
-          await suspensionRecord.save();
-          
-          const channel = client.channels.cache.get(config.discord.channels.suspendedChannel) as TextChannel;
-          if (channel) {
-            await channel.send(`<@${discordId}> unsuspended.`);
-          }
-          console.log(`[Unsuspension Check] Unsuspended user ${discordId} (member found).`);
+  console.log('[Unsuspension Check] Starting unsuspension check.');
+  
+  // Retrieve all documents from UnsuspensionDue
+  const docs = await UnsuspensionDue.find({});
+  if (docs.length === 0) {
+    console.log('[Unsuspension Check] No unsuspension due records found.');
+    console.log('[Unsuspension Check] Unsuspension check complete.');
+    return;
+  }
+  
+  const guild = client.guilds.cache.get(config.discord.guildId);
+  if (!guild) {
+    console.error('[Unsuspension Check] Guild not found in cache.');
+    return;
+  }
+  
+  const now = new Date();
+  for (const doc of docs) {
+    const discordId = doc._id;
+    // Retrieve the suspension record for this user
+    const record = await findOrCreateSuspensionByDiscordId(discordId);
+    if (record.suspended) {
+      const member = await guild.members.fetch(discordId).catch(() => null);
+      if (member) {
+        await RoleHandler.unsuspendMember(member, record.suspendedRoles);
+        record.suspended = false;
+        record.suspendedRoles = [];
+        record.ends = null;
+        await record.save();
+        const channel = client.channels.cache.get(config.discord.channels.suspendedChannel) as TextChannel;
+        if (channel) {
+          await channel.send(`<@${discordId}> unsuspended.`);
+        }
+        console.log(`[Unsuspension Check] Unsuspended ${discordId}.`);
+        await UnsuspensionDue.deleteOne({ _id: discordId });
+        console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId}.`);
+      } else {
+        // If member is not found and record is older than 3 months, clear the record.
+        if (record.ends && now.getTime() - new Date(record.ends).getTime() > THREE_MONTHS_MS) {
+          record.suspended = false;
+          record.suspendedRoles = [];
+          record.ends = null;
+          await record.save();
+          console.log(`[Unsuspension Check] Cleared record for ${discordId} (absent > 3 months).`);
           await UnsuspensionDue.deleteOne({ _id: discordId });
           console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId}.`);
         } else {
-          // Member not found in the guild; check if the record is >3 months old.
-          if (suspensionRecord.ends && now.getTime() - new Date(suspensionRecord.ends).getTime() > THREE_MONTHS_MS) {
-            suspensionRecord.suspended = false;
-            suspensionRecord.suspendedRoles = [];
-            suspensionRecord.ends = null;
-            await suspensionRecord.save();
-            console.log(`[Unsuspension Check] Cleared suspension record for ${discordId} (absent > 3 months).`);
-            await UnsuspensionDue.deleteOne({ _id: discordId });
-            console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId}.`);
-          }
+          console.warn(`[Unsuspension Check] ${discordId} not in guild; record remains for later processing.`);
         }
-      } else {
-        // Already unsuspended; remove the due document.
-        await UnsuspensionDue.deleteOne({ _id: discordId });
-        console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId} (already unsuspended).`);
       }
+    } else {
+      await UnsuspensionDue.deleteOne({ _id: discordId });
+      console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId} (already unsuspended).`);
     }
-    
-    console.log('[Unsuspension Check] Unsuspension check complete.');
-  } catch (err) {
-    console.error('[Unsuspension Check] Error processing unsuspensions:', err);
   }
+  
+  console.log('[Unsuspension Check] Unsuspension check complete.');
 }
