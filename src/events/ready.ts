@@ -8,19 +8,18 @@ export const once = true;
 
 export const execute = async (client: Client) => {
   console.log(`Ready! Logged in as ${client.user?.tag}`);
+  
+  const cycleDelay = 10 * 60 * 1000; // 10 minutes in milliseconds
 
-  // Run checkExpiredSuspensions() every 5 minutes 25 seconds.
-  setInterval(() => {
-    checkExpiredSuspensions();
-  }, 325000);
+  // An asynchronous loop that runs the tasks sequentially.
+  const runCycle = async (): Promise<void> => {
+    console.log('[Cycle] Starting cycle of background tasks.');
+    await checkExpiredSuspensions();
+    await processSuspensionEvents(client);
+    await processUnsuspensionEvents(client);
+    console.log('[Cycle] Background tasks cycle complete.');
+    setTimeout(runCycle, cycleDelay);
+  };
 
-  // Run processSuspensionEvents() every 17 minutes 10 seconds.
-  setInterval(() => {
-    processSuspensionEvents(client);
-  }, 1030000);
-
-  // Run processUnsuspensionEvents() every 2 minutes 15 seconds.
-  setInterval(() => {
-    processUnsuspensionEvents(client);
-  }, 135000);
+  runCycle();
 };
