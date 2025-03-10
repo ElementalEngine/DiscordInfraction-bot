@@ -178,6 +178,42 @@ export const rmDays = async (discordId: string, num: number): Promise<Date | nul
   }
 };
 
+export const removeTierInfraction = async (
+  discordId: string,
+  category: 'quit' | 'minor' | 'moderate' | 'major' | 'extreme'
+): Promise<{ tier: number; decays: Date | null }> => {
+  try {
+    // Fetch or create the suspension record.
+    const record = await findOrCreateSuspensionByDiscordId(discordId);
+    const currentTier: number = record[category]?.tier ?? 0;
+    
+    // If already at tier 0, return current state.
+    if (currentTier <= 0) {
+      console.log(`[removeTierInfraction] ${discordId} already has 0 tier for ${category}.`);
+      return { tier: 0, decays: null };
+    }
+    
+    const newTier = currentTier - 1;
+    const now = new Date();
+    
+    // Reset decay date: if newTier > 0, set to 90 days from now; otherwise, clear it.
+    const newDecay = newTier > 0 ? new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000) : null;
+    
+    // Build the update object.
+    const updateObj: Record<string, any> = {
+      [`${category}.tier`]: newTier,
+      [`${category}.decays`]: newDecay
+    };
+    
+    await updateSuspension(discordId, updateObj);
+    console.log(`[removeTierInfraction] Updated ${discordId} ${category} tier to ${newTier}.`);
+    return { tier: newTier, decays: newDecay };
+  } catch (error) {
+    console.error(`Error removing tier for ${discordId} in category ${category}:`, error);
+    throw error;
+  }
+};
+
    // Applies a sub-suspension by adding 3 days.
 export const subSuspension = async (discordId: string): Promise<Date> => {
   try {
