@@ -24,6 +24,8 @@ export const config = {
       civ6Novice: process.env.ROLE_CIV6_NOVICE ?? '',
       cplTournament: process.env.ROLE_CPL_TOURNAMENT ?? '',
       cplCloud: process.env.ROLE_CPL_CLOUD ?? '',
+      cplNoviceManager: process.env.ROLE_CPL_NOVICE_MANAGER ?? '',
+      cplCoach: process.env.ROLE_CPL_COACH ?? '',
       suspended: process.env.ROLE_SUSPENDED ?? '',
     },
   },

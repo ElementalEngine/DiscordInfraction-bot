@@ -16,6 +16,8 @@ export class RoleHandler {
       config.discord.roles.civ6Novice,
       config.discord.roles.cplTournament,
       config.discord.roles.cplCloud,
+      config.discord.roles.cplNoviceManager,
+      config.discord.roles.cplCoach
     ];
   }
 
