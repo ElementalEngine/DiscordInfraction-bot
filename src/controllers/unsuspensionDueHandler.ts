@@ -34,6 +34,7 @@ export async function processUnsuspensionEvents(client: Client): Promise<void> {
         record.suspended = false;
         record.suspendedRoles = [];
         record.ends = null;
+        record.pendingUnsuspension = false; 
         await record.save();
         const channel = client.channels.cache.get(config.discord.channels.suspendedChannel) as TextChannel;
         if (channel) {
@@ -48,6 +49,7 @@ export async function processUnsuspensionEvents(client: Client): Promise<void> {
           record.suspended = false;
           record.suspendedRoles = [];
           record.ends = null;
+          record.pendingUnsuspension = false;
           await record.save();
           console.log(`[Unsuspension Check] Cleared record for ${discordId} (absent > 3 months).`);
           await UnsuspensionDue.deleteOne({ _id: discordId });
