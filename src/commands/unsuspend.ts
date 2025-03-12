@@ -1,90 +1,82 @@
 import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder, User } from 'discord.js';
 import { config } from '../config';
-import { findOrCreateSuspensionByDiscordId, unsuspend, clearSuspendedRoles, UnsuspensionDue } from '../database/mongo';
+import { findOrCreateSuspensionByDiscordId, unsuspend, UnsuspensionDue, recordSuspensionDue } from '../database/mongo';
 import { RoleHandler } from '../controllers/roleHandler';
 import { buildUnsuspensionNotice, buildUnsuspensionChannelMessage } from '../controllers/messageHandler';
 
 export const data = new SlashCommandBuilder()
   .setName('unsuspend')
-  .setDescription('Unsuspend a member.')
+  .setDescription('Manually unsuspend a member (override).')
   .addUserOption(option =>
-    option
-      .setName('target')
+    option.setName('target')
       .setDescription('Select the user to unsuspend.')
-      .setRequired(true)
-  )
+      .setRequired(true))
   .addStringOption(option =>
-    option
-      .setName('reason')
+    option.setName('reason')
       .setDescription('Reason for unsuspension.')
-      .setRequired(true)
-  );
+      .setRequired(true));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: false });
   console.log('[Unsuspend Command] Execution started.');
 
-  // Ensure the command is used in the suspended channel.
+  // Validate channel and permissions.
   if (interaction.channel?.id !== config.discord.channels.suspendedChannel) {
-    console.log('[Unsuspend Command] Incorrect channel.');
     return interaction.editReply('This command can only be used in the suspended channel.');
   }
 
-  // Check mod permissions.
   const invoker = interaction.member as GuildMember;
-  const hasPermission = invoker.roles.cache.has(config.discord.roles.moderator) ||
-                        invoker.roles.cache.has(config.discord.roles.cplBackend);
-  if (!hasPermission) {
-    console.log('[Unsuspend Command] Insufficient permissions.');
+  if (
+    !invoker.roles.cache.has(config.discord.roles.moderator) &&
+    !invoker.roles.cache.has(config.discord.roles.cplBackend)
+  ) {
     return interaction.editReply('You do not have permission to use this command.');
   }
 
   // Retrieve target user and reason.
   const targetUser: User = interaction.options.getUser('target')!;
   const targetMember = interaction.options.getMember('target') as GuildMember | null;
-  const reason = interaction.options.getString('reason')!;
+  const reason = interaction.options.getString('reason') || 'No reason provided';
   console.log(`[Unsuspend Command] Target user: ${targetUser.id}.`);
 
   try {
+    // Check if the target is already processed for unsuspension (exists in UnsuspensionDue).
+    const unsuspRecord = await UnsuspensionDue.findOne({ _id: targetUser.id });
+    if (unsuspRecord) {
+      return interaction.editReply(`<@${targetUser.id}> has already been processed for unsuspension.`);
+    }
+
     // Retrieve the suspension record.
     const record = await findOrCreateSuspensionByDiscordId(targetUser.id);
     if (!record.suspended) {
-      console.log(`[Unsuspend Command] <@${targetUser.id}> is not suspended.`);
       return interaction.editReply(`<@${targetUser.id}> is not currently suspended.`);
     }
 
-    // If member is found in guild, restore roles.
+    // If the member is in the guild, restore their roles.
     if (targetMember) {
-      await RoleHandler.unsuspendMember(targetMember, record.suspendedRoles);
+      await RoleHandler.restoreMemberRoles(targetMember, record.suspendedRoles);
       console.log(`[Unsuspend Command] Restored roles for <@${targetUser.id}>.`);
     } else {
-      console.warn(`[Unsuspend Command] <@${targetUser.id}> not found in guild; proceeding with DB update only.`);
+      console.warn(`<@${targetUser.id}> not found in guild; proceeding with DB update only.`);
     }
 
-    // Update the suspension record (this now clears pendingUnsuspension too)
+    // Clear the suspension record.
     await unsuspend(targetUser.id);
-    await clearSuspendedRoles(targetUser.id); 
-    // Optionally, remove any unsuspension due document if it exists.
+
+    // Optionally, remove any leftover override document (shouldn't be present if the check passed).
     await UnsuspensionDue.deleteOne({ _id: targetUser.id });
     console.log(`[Unsuspend Command] Updated suspension record for <@${targetUser.id}>.`);
-    // Build messages using unsuspension message functions.
+
     const dmMessage = buildUnsuspensionNotice(reason);
     const channelMessage = buildUnsuspensionChannelMessage(targetUser.id, reason);
-
-    // Attempt to send a DM if the member is available.
     if (targetMember) {
-      try {
-        await targetMember.user.send(dmMessage);
-        console.log(`[Unsuspend Command] DM sent to <@${targetUser.id}>.`);
-      } catch (err) {
-        console.error(`[Unsuspend Command] Failed to DM <@${targetUser.id}>:`, err);
-      }
+      targetMember.user.send(dmMessage).catch(err => console.error(`Failed to DM <@${targetUser.id}>:`, err));
     }
 
     await interaction.editReply(channelMessage);
     console.log('[Unsuspend Command] Execution complete.');
   } catch (error) {
-    console.error(`[Unsuspend Command] Error executing unsuspend command for <@${targetUser.id}>:`, error);
+    console.error(`[Unsuspend Command] Error processing unsuspend for <@${targetUser.id}>:`, error);
     await interaction.editReply('There was an error processing the command.');
   }
 }

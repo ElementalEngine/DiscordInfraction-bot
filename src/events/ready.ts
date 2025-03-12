@@ -2,6 +2,7 @@ import { Client, Events } from 'discord.js';
 import { processSuspensionEvents } from '../controllers/suspensionDueHandler';
 import { processUnsuspensionEvents } from '../controllers/unsuspensionDueHandler';
 import { processTierDecays } from '../controllers/tierDecayHandler';
+import { queueExpiredUnsuspensions } from '../database/mongo';
 
 export const name = Events.ClientReady;
 export const once = true;
@@ -9,22 +10,37 @@ export const once = true;
 export const execute = async (client: Client) => {
   console.log(`Ready! Logged in as ${client.user?.tag}`);
 
-  const cycleDelay = 2 * 60 * 1000; // 2 minutes
+  const fastCycleDelay = 2 * 60 * 1000; // 2 minutes
+  const slowCycleDelay = 5 * 60 * 1000; // 5 minutes
 
-  const runCycle = async (): Promise<void> => {
+  // Fast cycle: runs queueExpiredUnsuspensions every 2 minutes.
+  const runFastCycle = async (): Promise<void> => {
     try {
-      console.log('[Cycle] Starting background tasks.');
-      await processUnsuspensionEvents(client);
-      await processSuspensionEvents(client);
-      await processTierDecays();
-      console.log('[Cycle] Background tasks complete.');
+      console.log('[Fast Cycle] Starting queueExpiredUnsuspensions.');
+      await queueExpiredUnsuspensions();
+      console.log('[Fast Cycle] queueExpiredUnsuspensions complete.');
     } catch (error) {
-      console.error('[Cycle] Error during background tasks:', error);
+      console.error('[Fast Cycle] Error in queueExpiredUnsuspensions:', error);
     } finally {
-      setTimeout(runCycle, cycleDelay);
+      setTimeout(runFastCycle, fastCycleDelay);
     }
   };
 
-  // Start the cycle.
-  runCycle();
+  // Slow cycle: runs suspension and unsuspension events and tier decays every 5 minutes.
+  const runSlowCycle = async (): Promise<void> => {
+    try {
+      console.log('[Slow Cycle] Starting background tasks.');
+      await processSuspensionEvents(client);
+      await processUnsuspensionEvents(client);
+      await processTierDecays();
+      console.log('[Slow Cycle] Background tasks complete.');
+    } catch (error) {
+      console.error('[Slow Cycle] Error during background tasks:', error);
+    } finally {
+      setTimeout(runSlowCycle, slowCycleDelay);
+    }
+  };
+
+  runFastCycle();
+  runSlowCycle();
 };

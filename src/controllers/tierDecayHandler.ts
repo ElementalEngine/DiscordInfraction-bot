@@ -1,6 +1,5 @@
 import { Suspension } from '../database/mongo';
 
-// Processes tier decay for all suspension records for each infraction category
 export const processTierDecays = async (): Promise<void> => {
   try {
     console.log('[Tier Decay] Starting tier decay processing.');
@@ -15,14 +14,17 @@ export const processTierDecays = async (): Promise<void> => {
       for (const category of categories) {
         const infraction = record[category];
         if (infraction.tier > 0 && infraction.decays) {
-          if (now > new Date(infraction.decays)) {
+          const decayDate = new Date(infraction.decays);
+          if (now > decayDate) {
+
             infraction.tier = Math.max(infraction.tier - 1, 0);
+
             if (infraction.tier === 0) {
               infraction.decays = null;
             } else {
-              // 1460 days for extreme infractions, 90 days for others.
-              const newDecay = new Date();
-              newDecay.setDate(newDecay.getDate() + (category === 'extreme' ? 1460 : 90));
+              const daysToAdd = category === 'extreme' ? 1460 : 90;
+              const newDecay = new Date(now.getTime());
+              newDecay.setDate(newDecay.getDate() + daysToAdd);
               infraction.decays = newDecay;
             }
             updated = true;

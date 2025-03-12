@@ -79,10 +79,7 @@ export const UnsuspensionDue: Model<IMinimal> = mongoose.model<IMinimal>('Unsusp
 /* ========================================================
     3. QUERIES & HELPER FUNCTIONS
    ======================================================== */
-/**
- * Finds a suspension record by Discord ID.
- * If it doesn't exist, creates one with default values.
- */
+// Finds a suspension record by Discord ID.
 export const findOrCreateSuspensionByDiscordId = async (discordId: string): Promise<ISuspension> => {
   let suspension = await Suspension.findOne({ discord_id: discordId });
   if (!suspension) {
@@ -116,7 +113,6 @@ export const recordBanDue = async (discordId: string): Promise<void> => {
 };
 
 // Records a suspension due.
-
 export const recordSuspensionDue = async (
   discordId: string,
   punishmentType: string,
@@ -138,7 +134,7 @@ export const recordUnsuspensionDue = async (discordId: string): Promise<void> =>
   try {
     await UnsuspensionDue.updateOne(
       { _id: discordId },
-      { $set: { _id: discordId } },
+      { $setOnInsert: { createdAt: new Date() } },
       { upsert: true }
     );
     console.log(`[recordUnsuspensionDue] Recorded unsuspension event for ${discordId}`);
@@ -148,7 +144,38 @@ export const recordUnsuspensionDue = async (discordId: string): Promise<void> =>
 };
 
 /* ========================================================
-    4. SUSPENSION & INFRACTION OPERATIONS
+    4. AUTOMATIC UNSUSPENSION PROCESSING
+   ======================================================== */
+// Processes all unsuspension events due.
+export const queueExpiredUnsuspensions = async (): Promise<void> => {
+  console.log('[Queue Expired Unsuspensions] Starting queueing of expired unsuspensions.');
+  try {
+    const now = new Date();
+    const expiredRecords = await Suspension.find({ suspended: true, ends: { $lte: now } });
+    
+    if (expiredRecords.length === 0) {
+      console.log('[Queue Expired Unsuspensions] No expired suspensions found.');
+    } else {
+      for (const record of expiredRecords) {
+        // Check if an unsuspension event is already queued for this user.
+        const existingEvent = await UnsuspensionDue.findOne({ _id: record.discord_id });
+        if (existingEvent) {
+          console.log(`[Queue Expired Unsuspensions] Unsuspension event already queued for ${record.discord_id}`);
+          continue;
+        }
+        await recordUnsuspensionDue(record.discord_id);
+        console.log(`[Queue Expired Unsuspensions] Recorded unsuspension event for ${record.discord_id}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error queueing expired unsuspensions:', error);
+  } finally {
+    console.log('[Queue Expired Unsuspensions] Queueing complete.');
+  }
+};
+
+/* ========================================================
+    5. SUSPENSION & INFRACTION OPERATIONS
    ======================================================== */
 // Adds a number of days to the suspension end date and marks the player as suspended.
 export const addDays = async (discordId: string, num: number): Promise<Date> => {
@@ -188,7 +215,6 @@ export const removeTierInfraction = async (
     // Fetch or create the suspension record.
     const record = await findOrCreateSuspensionByDiscordId(discordId);
     const currentTier: number = record[category]?.tier ?? 0;
-    
     // If already at tier 0, return without change.
     if (currentTier <= 0) {
       console.log(`[removeTierInfraction] ${discordId} already has 0 tier for ${category}. No changes made.`);
@@ -198,7 +224,6 @@ export const removeTierInfraction = async (
     // Reduce the tier.
     const newTier = currentTier - 1;
     const now = new Date();
-    // Set decay date only if there's still an infraction.
     const newDecay = newTier > 0 ? new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000) : null;
     
     // Build the update object.
@@ -256,18 +281,18 @@ export const compSuspension = async (discordId: string): Promise<Date> => {
 export const unsuspend = async (discordId: string): Promise<void> => {
   try {
     await updateSuspension(discordId, { suspended: false, ends: null });
-    await recordUnsuspensionDue(discordId);
-    console.log(`unsuspend: Suspension cleared and unsuspension event recorded for ${discordId}`);
+    console.log(`unsuspend: Suspension cleared for ${discordId}`);
   } catch (error) {
     console.error(`Error unsuspending ${discordId}:`, error);
     throw error;
   }
 };
 
-// Updates the suspended roles in the record.
+// Updates the suspended roles in the record in sorted order.
 export const updateSuspendedRoles = async (discordId: string, rolesArray: string[]): Promise<void> => {
   try {
-    await updateSuspension(discordId, { suspendedRoles: rolesArray });
+    const sortedRoles = rolesArray.sort();
+    await updateSuspension(discordId, { suspendedRoles: sortedRoles });
   } catch (error) {
     console.error(`Error updating suspended roles for ${discordId}:`, error);
     throw error;

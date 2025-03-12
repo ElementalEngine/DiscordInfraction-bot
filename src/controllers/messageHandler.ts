@@ -14,9 +14,7 @@ const durations: { [key: string]: number[] } = {
 
 const flatPunishments = ['oversub', 'comp', 'smurf'];
 
-/**
- * Builds a suspension notice message for direct messages.
- */
+// Builds a suspension notice message for direct messages.
 export function buildSuspensionNotice(
   infractionType: string,
   tier: number,
@@ -24,14 +22,13 @@ export function buildSuspensionNotice(
   reason?: string,
   isBanTier: boolean = false
 ): string {
-  // Format the end date as "DD/MM/YYYY, HH:MM:SS"
-  const formattedEnd = `${endDate.toLocaleDateString()}, ${endDate.toLocaleTimeString()}`;
+
+  const formattedEnd = new Date(endDate).toUTCString();
   const typeKey = infractionType.toLowerCase();
   const daysArray = durations[typeKey] || [];
   let suspensionDays: number;
   let infractionLine: string;
 
-  // For flat-rate punishments, ignore the tier.
   if (flatPunishments.includes(typeKey)) {
     suspensionDays = daysArray[0] || 0;
     infractionLine = `Infraction: **[ ${infractionType.toUpperCase()} ]**\n`;
@@ -49,16 +46,13 @@ export function buildSuspensionNotice(
                 `Result: ${resultLine}\n` +
                 `Suspension ends on: **${formattedEnd}**\n` +
                 `Reason: ${reason || 'No reason provided'}`;
-                
   if (isBanTier) {
     message += `\nYou have reached tier **${tier}**. You now have **24 hours** to appeal your permaban.`;
   }
   return message;
 }
 
-/**
- * Builds a suspension channel message for notifications.
- */
+// Builds a suspension channel message for notifications.
 export function buildSuspensionChannelMessage(
   userId: string,
   infractionType: string,
@@ -67,8 +61,7 @@ export function buildSuspensionChannelMessage(
   reason?: string,
   isBanTier: boolean = false
 ): string {
-  // Format the end date as "DD/MM/YYYY, HH:MM:SS"
-  const formattedEnd = `${endDate.toLocaleDateString()}, ${endDate.toLocaleTimeString()}`;
+  const formattedEnd = new Date(endDate).toUTCString();
   const typeKey = infractionType.toLowerCase();
   const daysArray = durations[typeKey] || [];
   let suspensionDays: number;
@@ -98,18 +91,14 @@ export function buildSuspensionChannelMessage(
   return message;
 }
 
-/**
- * Builds an unsuspension notice message for direct messages.
- */
+// Builds an unsuspension notice message for direct messages.
 export function buildUnsuspensionNotice(reason?: string): string {
   return `Unsuspension Notice:\n` +
           `**Your suspension has been lifted.**\n` +
           `Reason: ${reason || 'No reason provided'}`;
 }
 
-/**
- * Builds an unsuspension channel message for notifications.
- */
+// Builds an unsuspension channel message for notifications.
 export function buildUnsuspensionChannelMessage(userId: string, reason?: string): string {
   return `Unsuspension Notice:\n` +
           `Member: <@${userId}>\n` +

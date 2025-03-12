@@ -8,76 +8,68 @@ export const data = new SlashCommandBuilder()
   .setName('major')
   .setDescription('Record a major infraction for a member.')
   .addUserOption(option =>
-    option
-      .setName('target')
+    option.setName('target')
       .setDescription('Select the user for a major infraction.')
-      .setRequired(true)
-  )
+      .setRequired(true))
   .addStringOption(option =>
-    option
-      .setName('reason')
+    option.setName('reason')
       .setDescription('Reason for the major infraction.')
-      .setRequired(true)
-  );
+      .setRequired(true));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: false });
+  console.log('[Major Command] Execution started.');
 
-  // Ensure the command is used in the suspended channel.
+  // Validate channel and permissions.
   if (interaction.channel?.id !== config.discord.channels.suspendedChannel) {
     return interaction.editReply('This command can only be used in the suspended channel.');
   }
 
-  // Check mod permissions.
   const invoker = interaction.member as GuildMember;
-  const hasPermission =
-    invoker.roles.cache.has(config.discord.roles.moderator) ||
-    invoker.roles.cache.has(config.discord.roles.cplBackend);
-  if (!hasPermission) {
+  if (
+    !invoker.roles.cache.has(config.discord.roles.moderator) &&
+    !invoker.roles.cache.has(config.discord.roles.cplBackend)
+  ) {
     return interaction.editReply('You do not have permission to use this command.');
   }
 
-  // Get target user and try to get the GuildMember.
+  // Retrieve target user, member, and reason.
   const targetUser: User = interaction.options.getUser('target')!;
   const targetMember = interaction.options.getMember('target') as GuildMember | null;
   const reason = interaction.options.getString('reason')!;
+  console.log(`[Major Command] Target user: ${targetUser.id}.`);
 
   try {
-    // Update the suspension record by recording a major infraction.
+    // Record the major infraction and retrieve the new tier and suspension end date.
     const result = await recordMajorInfraction(targetUser.id);
 
     if (targetMember) {
-      if (result.tier < 4) {  // Assuming major infraction ban threshold is tier 4.
-        await RoleHandler.suspendMember(targetMember);
-        const dmMessage = buildSuspensionNotice('major', result.tier, result.ends, reason, false);
-        const channelMessage = buildSuspensionChannelMessage(targetUser.id, 'major', result.tier, result.ends, reason, false);
-        try {
-          await targetMember.user.send(dmMessage);
-        } catch (err) {
-          console.error(`Failed to DM <@${targetUser.id}>:`, err);
-        }
-        await interaction.editReply(channelMessage);
+      let dmMessage: string, channelMessage: string;
+      if (result.tier < 4) {
+        // For tier less than 4, apply suspension normally.
+        await RoleHandler.applySuspensionRoles(targetMember);
+        dmMessage = buildSuspensionNotice('major', result.tier, result.ends, reason, false);
+        channelMessage = buildSuspensionChannelMessage(targetUser.id, 'major', result.tier, result.ends, reason, false);
       } else {
-        // Tier 4 reached: record ban due and notify moderators.
-        await RoleHandler.suspendMember(targetMember);
+        // For tier 4 or above, record a ban.
+        await RoleHandler.applySuspensionRoles(targetMember);
         await recordBanDue(targetUser.id);
-        const dmMessage = buildSuspensionNotice('major', result.tier, result.ends, reason, true);
-        const channelMessage = buildSuspensionChannelMessage(targetUser.id, 'major', result.tier, result.ends, reason, true);
-        try {
-          await targetMember.user.send(dmMessage);
-        } catch (err) {
-          console.error(`Failed to DM <@${targetUser.id}>:`, err);
-        }
-        await interaction.editReply(channelMessage);
+        dmMessage = buildSuspensionNotice('major', result.tier, result.ends, reason, true);
+        channelMessage = buildSuspensionChannelMessage(targetUser.id, 'major', result.tier, result.ends, reason, true);
       }
+      targetMember.user.send(dmMessage).catch(err => console.error(`Failed to DM <@${targetUser.id}>:`, err));
+      await interaction.editReply(channelMessage);
     } else {
       // If the user is not in the guild, record a SuspensionDue document.
       await recordSuspensionDue(targetUser.id, 'major');
       console.log(`[Major Command] Recorded suspension due for absent user ${targetUser.id}.`);
-      await interaction.editReply(`<@${targetUser.id}> is not in the guild. Their major infraction has been recorded for processing when they rejoin.`);
+      await interaction.editReply(
+        `<@${targetUser.id}> is not in the guild. Their major infraction has been recorded for processing when they rejoin.`
+      );
     }
+    console.log('[Major Command] Execution complete.');
   } catch (error) {
-    console.error('Error executing major command:', error);
+    console.error(`Error executing major command for ${targetUser.id}:`, error);
     await interaction.editReply('There was an error processing the command.');
   }
 }
