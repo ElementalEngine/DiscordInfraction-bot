@@ -10,7 +10,7 @@ export const once = true;
 export const execute = async (client: Client) => {
   console.log(`Ready! Logged in as ${client.user?.tag}`);
 
-  const cycleDelay = 9 * 60 * 1000; 
+  const cycleDelay = 5 * 60 * 1000; 
 
   // Asynchronous loop that runs all background tasks sequentially.
   const runCycle = async (): Promise<void> => {
