@@ -3,7 +3,7 @@ import { config } from '../config';
 import { UnsuspensionDue, findOrCreateSuspensionByDiscordId } from '../database/mongo';
 import { RoleHandler } from './roleHandler';
 
-const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000; // Approximate 3 months
+const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000; 
 
 export async function processUnsuspensionEvents(client: Client): Promise<void> {
   console.log('[Unsuspension Check] Starting unsuspension check.');
@@ -25,7 +25,6 @@ export async function processUnsuspensionEvents(client: Client): Promise<void> {
   const now = new Date();
   for (const doc of docs) {
     const discordId = doc._id;
-    // Retrieve the suspension record for this user
     const record = await findOrCreateSuspensionByDiscordId(discordId);
     if (record.suspended) {
       const member = await guild.members.fetch(discordId).catch(() => null);
@@ -34,7 +33,6 @@ export async function processUnsuspensionEvents(client: Client): Promise<void> {
         record.suspended = false;
         record.suspendedRoles = [];
         record.ends = null;
-        record.pendingUnsuspension = false; 
         await record.save();
         const channel = client.channels.cache.get(config.discord.channels.suspendedChannel) as TextChannel;
         if (channel) {
@@ -44,12 +42,10 @@ export async function processUnsuspensionEvents(client: Client): Promise<void> {
         await UnsuspensionDue.deleteOne({ _id: discordId });
         console.log(`[Unsuspension Check] Removed unsuspension due document for ${discordId}.`);
       } else {
-        // If member is not found and record is older than 3 months, clear the record.
         if (record.ends && now.getTime() - new Date(record.ends).getTime() > THREE_MONTHS_MS) {
           record.suspended = false;
           record.suspendedRoles = [];
           record.ends = null;
-          record.pendingUnsuspension = false;
           await record.save();
           console.log(`[Unsuspension Check] Cleared record for ${discordId} (absent > 3 months).`);
           await UnsuspensionDue.deleteOne({ _id: discordId });

@@ -35,13 +35,11 @@ export const InfractionSchema = new Schema<IInfraction>(
 /* ========================================================
     2. MODELS
    ======================================================== */
-// Suspension model – holds infraction details, suspended flag, end date, cached roles,
-// and our new flag pendingUnsuspension to track if unsuspension processing is pending.
+// Suspension model – holds infraction details, suspended flag, end date, and cached roles.
 export interface ISuspension extends Document {
   discord_id: string;
   suspended: boolean;
   ends: Date | null;
-  pendingUnsuspension: boolean;
   suspendedRoles: string[];
   quit: IInfraction;
   minor: IInfraction;
@@ -49,12 +47,10 @@ export interface ISuspension extends Document {
   major: IInfraction;
   extreme: IInfraction;
 }
-// Disable minimization so that fields with default values (like pendingUnsuspension) are explicitly stored.
 const SuspensionSchema: Schema = new Schema({
   discord_id: { type: String, required: true, unique: true },
   suspended: { type: Boolean, default: false },
   ends: { type: Date, default: null },
-  pendingUnsuspension: { type: Boolean, default: false },
   suspendedRoles: { type: [String], default: [] },
   quit: { type: InfractionSchema, default: { tier: 0, decays: null } },
   minor: { type: InfractionSchema, default: { tier: 0, decays: null } },
@@ -94,7 +90,6 @@ export const findOrCreateSuspensionByDiscordId = async (discordId: string): Prom
       discord_id: discordId,
       suspended: false,
       ends: null,
-      pendingUnsuspension: false, 
       suspendedRoles: [],
       quit: { tier: 0, decays: null },
       minor: { tier: 0, decays: null },
@@ -249,10 +244,11 @@ export const compSuspension = async (discordId: string): Promise<Date> => {
 };
 
 // Unsuspends the player by clearing the suspended flag and end date.
-// This function is called by the unsuspension event process.
+// After updating, it records the unsuspension event in the UnsuspensionDue collection.
 export const unsuspend = async (discordId: string): Promise<void> => {
   try {
-    await updateSuspension(discordId, { suspended: false, ends: null, pendingUnsuspension: false });
+    await updateSuspension(discordId, { suspended: false, ends: null });
+    await recordUnsuspensionDue(discordId);
   } catch (error) {
     console.error(`Error unsuspending ${discordId}:`, error);
     throw error;
@@ -346,7 +342,6 @@ async function recordInfraction(
     } else {
       updateObj.ends = currentEnd;
       retEnds = currentEnd;
-      updateObj.pendingUnsuspension = false;
     }
 
     await updateSuspension(discordId, updateObj);
@@ -375,43 +370,4 @@ export const recordMajorInfraction = async (discordId: string) => {
 
 export const recordExtremeInfraction = async (discordId: string) => {
   return await recordInfraction(discordId, 'extreme');
-};
-
-/* ========================================================
-    5. EXPIRED SUSPENSION CHECK
-   ======================================================== */
-/**
-  * Checks for expired suspensions and moves them into UnsuspensionDue.
- */
-export const checkExpiredSuspensions = async (): Promise<void> => {
-  try {
-    console.log('[Expired Suspensions] Starting expired suspension check.');
-    const now = new Date();
-    const expiredRecords = await Suspension.find({ 
-      suspended: true, 
-      pendingUnsuspension: true, 
-      ends: { $lte: now } 
-    });
-    if (expiredRecords.length === 0) {
-      console.log('[Expired Suspensions] No expired suspensions found.');
-      console.log('[Expired Suspensions] Expired suspension check complete.');
-      return;
-    }
-    for (const record of expiredRecords) {
-      try {
-        await UnsuspensionDue.updateOne(
-          { _id: record.discord_id },
-          { $set: { _id: record.discord_id } },
-          { upsert: true }
-        );
-        const doc = await UnsuspensionDue.findOne({ _id: record.discord_id });
-        console.log(`[Expired Suspensions] Moved ${record.discord_id} into UnsuspensionDue. Document created at: ${doc?.createdAt}`);
-      } catch (upsertError: any) {
-        console.error(`[Expired Suspensions] Error upserting UnsuspensionDue for ${record.discord_id}:`, upsertError);
-      }
-    }
-    console.log('[Expired Suspensions] Expired suspension check complete.');
-  } catch (error) {
-    console.error('[Expired Suspensions] Error checking expired suspensions:', error);
-  }
 };
