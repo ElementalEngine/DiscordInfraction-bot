@@ -35,7 +35,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // Check that the invoker has the required permissions.
   const invoker = interaction.member as GuildMember;
-  const hasPermission = 
+  const hasPermission =
     invoker.roles.cache.has(config.discord.roles.moderator) ||
     invoker.roles.cache.has(config.discord.roles.cplBackend);
   if (!hasPermission) {
@@ -56,10 +56,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     // Remove one tier from the specified category.
     const result = await removeTierInfraction(targetUser.id, category);
     const newDecay = result.decays 
-      ? `${result.decays.toLocaleDateString()}, ${result.decays.toLocaleTimeString()}`
+      ? `${result.decays.toLocaleDateString()}, ${result.decays.toLocaleTimeString()}` 
       : 'none';
 
-    if (result.tier === 0) {
+    if (!result.removed) {
       await interaction.editReply(`<@${targetUser.id}> is already at Tier 0 for ${category.toUpperCase()}. No changes made.`);
     } else {
       await interaction.editReply(`<@${targetUser.id}> now has **Tier ${result.tier} ${category.toUpperCase()}**.\nNew decay date: **${newDecay}**.`);

@@ -115,10 +115,8 @@ export const recordBanDue = async (discordId: string): Promise<void> => {
   }
 };
 
-/**
- * Records a suspension due.
- * Now accepts punishmentType and reason to store additional details.
- */
+// Records a suspension due.
+
 export const recordSuspensionDue = async (
   discordId: string,
   punishmentType: string,
@@ -135,12 +133,17 @@ export const recordSuspensionDue = async (
   }
 };
 
-// Records an unsuspension due.
+// Records an unsuspension event by upserting a document into the UnsuspensionDue collection.
 export const recordUnsuspensionDue = async (discordId: string): Promise<void> => {
   try {
-    await UnsuspensionDue.create({ _id: discordId });
+    await UnsuspensionDue.updateOne(
+      { _id: discordId },
+      { $set: { _id: discordId } },
+      { upsert: true }
+    );
+    console.log(`[recordUnsuspensionDue] Recorded unsuspension event for ${discordId}`);
   } catch (err: any) {
-    if (err.code !== 11000) console.error(`Error recording unsuspension due for ${discordId}:`, err);
+    console.error(`Error recording unsuspension due for ${discordId}:`, err);
   }
 };
 
@@ -180,22 +183,22 @@ export const rmDays = async (discordId: string, num: number): Promise<Date | nul
 export const removeTierInfraction = async (
   discordId: string,
   category: 'quit' | 'minor' | 'moderate' | 'major' | 'extreme'
-): Promise<{ tier: number; decays: Date | null }> => {
+): Promise<{ removed: boolean; tier: number; decays: Date | null }> => {
   try {
     // Fetch or create the suspension record.
     const record = await findOrCreateSuspensionByDiscordId(discordId);
     const currentTier: number = record[category]?.tier ?? 0;
     
-    // If already at tier 0, return current state.
+    // If already at tier 0, return without change.
     if (currentTier <= 0) {
-      console.log(`[removeTierInfraction] ${discordId} already has 0 tier for ${category}.`);
-      return { tier: 0, decays: null };
+      console.log(`[removeTierInfraction] ${discordId} already has 0 tier for ${category}. No changes made.`);
+      return { removed: false, tier: 0, decays: null };
     }
     
+    // Reduce the tier.
     const newTier = currentTier - 1;
     const now = new Date();
-    
-    // Reset decay date: if newTier > 0, set to 90 days from now; otherwise, clear it.
+    // Set decay date only if there's still an infraction.
     const newDecay = newTier > 0 ? new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000) : null;
     
     // Build the update object.
@@ -205,8 +208,14 @@ export const removeTierInfraction = async (
     };
     
     await updateSuspension(discordId, updateObj);
-    console.log(`[removeTierInfraction] Updated ${discordId} ${category} tier to ${newTier}.`);
-    return { tier: newTier, decays: newDecay };
+    
+    if (newTier === 0) {
+      console.log(`[removeTierInfraction] Removed infraction for ${discordId} in category ${category}. New tier is 0.`);
+    } else {
+      console.log(`[removeTierInfraction] Updated ${discordId} ${category} tier to ${newTier}.`);
+    }
+    
+    return { removed: true, tier: newTier, decays: newDecay };
   } catch (error) {
     console.error(`Error removing tier for ${discordId} in category ${category}:`, error);
     throw error;
@@ -244,11 +253,11 @@ export const compSuspension = async (discordId: string): Promise<Date> => {
 };
 
 // Unsuspends the player by clearing the suspended flag and end date.
-// After updating, it records the unsuspension event in the UnsuspensionDue collection.
 export const unsuspend = async (discordId: string): Promise<void> => {
   try {
     await updateSuspension(discordId, { suspended: false, ends: null });
     await recordUnsuspensionDue(discordId);
+    console.log(`unsuspend: Suspension cleared and unsuspension event recorded for ${discordId}`);
   } catch (error) {
     console.error(`Error unsuspending ${discordId}:`, error);
     throw error;
