@@ -49,7 +49,7 @@ export interface ISuspension extends Document {
   major: IInfraction;
   extreme: IInfraction;
 }
-
+// Disable minimization so that fields with default values (like pendingUnsuspension) are explicitly stored.
 const SuspensionSchema: Schema = new Schema({
   discord_id: { type: String, required: true, unique: true },
   suspended: { type: Boolean, default: false },
@@ -61,7 +61,7 @@ const SuspensionSchema: Schema = new Schema({
   moderate: { type: InfractionSchema, default: { tier: 0, decays: null } },
   major: { type: InfractionSchema, default: { tier: 0, decays: null } },
   extreme: { type: InfractionSchema, default: { tier: 0, decays: null } },
-});
+}, { minimize: false });
 
 export const Suspension: Model<ISuspension> = mongoose.model<ISuspension>('Suspension', SuspensionSchema);
 
@@ -94,7 +94,7 @@ export const findOrCreateSuspensionByDiscordId = async (discordId: string): Prom
       discord_id: discordId,
       suspended: false,
       ends: null,
-      pendingUnsuspension: false,
+      pendingUnsuspension: false, 
       suspendedRoles: [],
       quit: { tier: 0, decays: null },
       minor: { tier: 0, decays: null },
@@ -159,8 +159,7 @@ export const addDays = async (discordId: string, num: number): Promise<Date> => 
     const now = new Date();
     const currentEnd = record.ends && new Date(record.ends) > now ? new Date(record.ends) : now;
     currentEnd.setDate(currentEnd.getDate() + num);
-    // Mark as suspended and flag that unsuspension processing is pending.
-    await updateSuspension(discordId, { suspended: true, ends: currentEnd, pendingUnsuspension: true });
+    await updateSuspension(discordId, { suspended: true, ends: currentEnd });
     return currentEnd;
   } catch (error) {
     console.error(`Error adding ${num} days for ${discordId}:`, error);
@@ -250,9 +249,9 @@ export const compSuspension = async (discordId: string): Promise<Date> => {
 };
 
 // Unsuspends the player by clearing the suspended flag and end date.
+// This function is called by the unsuspension event process.
 export const unsuspend = async (discordId: string): Promise<void> => {
   try {
-    // Also clear pendingUnsuspension so it isn’t reprocessed.
     await updateSuspension(discordId, { suspended: false, ends: null, pendingUnsuspension: false });
   } catch (error) {
     console.error(`Error unsuspending ${discordId}:`, error);
@@ -319,40 +318,35 @@ async function recordInfraction(
     let newTier: number = Math.min(currentTier + 1, caps[category]);
 
     const now = new Date();
-    // Use the existing end date if it's in the future; otherwise, now.
     const currentEnd = record.ends && new Date(record.ends) > now ? new Date(record.ends) : now;
     
-    // Determine suspension duration based on new tier.
     let daysToAdd = 0;
     if (newTier <= durations[category].length) {
       daysToAdd = durations[category][newTier - 1];
     }
     currentEnd.setDate(currentEnd.getDate() + daysToAdd);
 
-    // Set decay period: for extreme infractions, 4 years (1460 days); otherwise, 90 days.
+    // Set decay period.
     const decays = new Date();
     decays.setDate(decays.getDate() + (category === 'extreme' ? 1460 : 90));
 
-    // For minor infractions, if tier is 1 (warning) then do not mark as suspended.
+    // For minor infractions (warning), do not mark as suspended.
     const suspended = !(category === 'minor' && newTier === 1);
 
-    // Build the update object.
     const updateObj: Record<string, any> = {
       [`${category}.tier`]: newTier,
       [`${category}.decays`]: decays,
       suspended: suspended,
     };
 
-    // If it's a minor warning, store no end date in the DB but return a fallback date.
     let retEnds: Date;
     if (category === 'minor' && newTier === 1) {
       updateObj.ends = null;
-      retEnds = now; // Fallback: you can choose a different default if desired.
+      retEnds = now;
     } else {
       updateObj.ends = currentEnd;
       retEnds = currentEnd;
-      // Mark that this suspension is pending unsuspension processing.
-      updateObj.pendingUnsuspension = true;
+      updateObj.pendingUnsuspension = false;
     }
 
     await updateSuspension(discordId, updateObj);
@@ -387,8 +381,7 @@ export const recordExtremeInfraction = async (discordId: string) => {
     5. EXPIRED SUSPENSION CHECK
    ======================================================== */
 /**
- * Scans for expired suspensions and upserts an UnsuspensionDue document for each.
- * This ensures that if a suspension has ended, an unsuspension action is triggered.
+  * Checks for expired suspensions and moves them into UnsuspensionDue.
  */
 export const checkExpiredSuspensions = async (): Promise<void> => {
   try {
