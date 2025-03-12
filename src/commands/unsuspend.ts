@@ -1,6 +1,6 @@
 import { ChatInputCommandInteraction, GuildMember, SlashCommandBuilder, User } from 'discord.js';
 import { config } from '../config';
-import { findOrCreateSuspensionByDiscordId, unsuspend, clearSuspendedRoles } from '../database/mongo';
+import { findOrCreateSuspensionByDiscordId, unsuspend, clearSuspendedRoles, UnsuspensionDue } from '../database/mongo';
 import { RoleHandler } from '../controllers/roleHandler';
 import { buildUnsuspensionNotice, buildUnsuspensionChannelMessage } from '../controllers/messageHandler';
 
@@ -61,11 +61,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       console.warn(`[Unsuspend Command] <@${targetUser.id}> not found in guild; proceeding with DB update only.`);
     }
 
-    // Update the suspension record in the database.
+    // Update the suspension record (this now clears pendingUnsuspension too)
     await unsuspend(targetUser.id);
-    await clearSuspendedRoles(targetUser.id);
+    await clearSuspendedRoles(targetUser.id); 
+    // Optionally, remove any unsuspension due document if it exists.
+    await UnsuspensionDue.deleteOne({ _id: targetUser.id });
     console.log(`[Unsuspend Command] Updated suspension record for <@${targetUser.id}>.`);
-
     // Build messages using unsuspension message functions.
     const dmMessage = buildUnsuspensionNotice(reason);
     const channelMessage = buildUnsuspensionChannelMessage(targetUser.id, reason);
